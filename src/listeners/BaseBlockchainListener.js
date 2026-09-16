@@ -99,10 +99,27 @@ class BaseBlockchainListener {
    * @returns {Promise<number>}
    */
   async getLastCheckedBlock() {
-    // This would typically query the database for the last checked block
-    // For now, we'll return a placeholder value
-    // In a real implementation, this would be stored in the database
-    return this.lastCheckedBlock || await this.getCurrentBlockNumber();
+    if (this.lastCheckedBlock) {
+      return this.lastCheckedBlock;
+    }
+
+    if (this.db) {
+      try {
+        const result = await this.db.query(
+          'SELECT last_checked_block FROM listener_state WHERE network = $1',
+          [this.config.name]
+        );
+        if (result && result.rows && result.rows.length > 0) {
+          this.lastCheckedBlock = parseInt(result.rows[0].last_checked_block, 10);
+          console.log(`[${this.config.name}] Retrieved last checked block from database: ${this.lastCheckedBlock}`);
+          return this.lastCheckedBlock;
+        }
+      } catch (err) {
+        console.error(`[${this.config.name}] Failed to fetch last checked block from DB:`, err.message);
+      }
+    }
+
+    return await this.getCurrentBlockNumber();
   }
 
   /**
@@ -396,9 +413,22 @@ class BaseBlockchainListener {
    */
   async updateLastCheckedBlock(blockNumber) {
     this.lastCheckedBlock = blockNumber;
-    // This would typically update the database
-    // For now, we'll just log
     console.log(`[${this.config.name}] Updated last checked block to ${blockNumber}`);
+
+    if (this.db) {
+      try {
+        await this.db.query(
+          `INSERT INTO listener_state (network, last_checked_block, updated_at)
+           VALUES ($1, $2, NOW())
+           ON CONFLICT (network) DO UPDATE SET
+             last_checked_block = EXCLUDED.last_checked_block,
+             updated_at = NOW()`,
+          [this.config.name, blockNumber]
+        );
+      } catch (err) {
+        console.error(`[${this.config.name}] Failed to persist last checked block to DB:`, err.message);
+      }
+    }
   }
 }
 

@@ -282,7 +282,7 @@ async function startCompleteSystem(networksToStart) { // Accept networks argumen
     console.log(`Starting complete blockchain payment system. Networks: ${networksToStart.length > 0 ? networksToStart.join(', ') : 'None Specified'}...`);
     
     // Pass networks to the underlying system start function
-    const { paymentProcessor, listenerManager, server } = await startBlockchainPaymentSystem(networksToStart);
+    const { paymentProcessor, listenerManager, server, db } = await startBlockchainPaymentSystem(networksToStart);
     
     // Create and configure the payment verification system
     const verificationConfig = {
@@ -332,7 +332,8 @@ async function startCompleteSystem(networksToStart) { // Accept networks argumen
       paymentProcessor,
       listenerManager,
       verificationSystem,
-      server
+      server,
+      db
     };
   } catch (error) {
     console.error('Failed to start complete system:', error);

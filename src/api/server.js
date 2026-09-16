@@ -15,14 +15,15 @@ const TransactionStorage = require('./services/TransactionStorage');
  * @param {Object} networkConfig - Network configuration
  * @returns {Object} - Express app
  */
-function createServer(networkConfig) {
+function createServer(networkConfig, db = null) {
   const app = express();
   
-  // Initialize the transaction storage
-  const transactionStorage = new TransactionStorage(networkConfig);
+  // Initialize the transaction storage with db support
+  const transactionStorage = new TransactionStorage(networkConfig, db);
   
-  // Add transaction storage to the app for direct access in other modules
+  // Add transaction storage and db to the app for direct access in other modules
   app.locals.transactionStorage = transactionStorage;
+  app.locals.db = db;
   
   // Configure middleware
   app.use(cors());
@@ -67,7 +68,12 @@ function createServer(networkConfig) {
  * @returns {Promise<Object>} - Express app and server objects
  */
 async function initializeApiServer(paymentProcessor, listenerManager, db, networkConfig) {
-  const { app, transactionStorage } = createServer(networkConfig);
+  const { app, transactionStorage } = createServer(networkConfig, db);
+  
+  // Load existing transactions from database if configured
+  if (db) {
+    await transactionStorage.loadFromDb();
+  }
   
   // Create API routes
   const router = createRoutes(paymentProcessor, listenerManager, db, transactionStorage, networkConfig);

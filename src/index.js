@@ -54,6 +54,8 @@ async function startBlockchainPaymentSystem(networksToStart = []) {
     console.log(`API server is running on http://localhost:${server.address().port}`);
     console.log(`Local transactions endpoint: http://localhost:${server.address().port}/api/local-transactions`);
     
+    const db = require('./db');
+
     // Return the initialized components
     return {
       app,
@@ -61,7 +63,8 @@ async function startBlockchainPaymentSystem(networksToStart = []) {
       paymentProcessor,
       listenerManager,
       transactionStorage,
-      networks // Include networks config in return
+      networks,
+      db
     };
   } catch (error) {
     console.error('Failed to start blockchain payment system:', error);

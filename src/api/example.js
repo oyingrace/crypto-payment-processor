@@ -5,6 +5,7 @@
 const { initializeApiServer } = require('./server');
 const { PaymentProcessor, PaymentSessionManager } = require('../payment');
 const ListenerManager = require('../listeners/ListenerManager');
+const db = require('../db');
 
 /**
  * Initialize the API server with all necessary components
@@ -14,17 +15,20 @@ const ListenerManager = require('../listeners/ListenerManager');
  */
 async function initializeApi(networksToStart = [], networkConfigs) {
   try {
+    // Initialize DB schema if connected
+    await db.initDb();
+
     // Create a session manager for the payment processor
-    const sessionManager = new PaymentSessionManager(null, networkConfigs);
+    const sessionManager = new PaymentSessionManager(db, networkConfigs);
     
     // Create a payment processor with the session manager
-    const paymentProcessor = new PaymentProcessor(null, sessionManager);
+    const paymentProcessor = new PaymentProcessor(db, sessionManager);
     
     // Initialize the payment processor
     await paymentProcessor.initialize();
     
     // Create and initialize the listener manager
-    const listenerManager = new ListenerManager();
+    const listenerManager = new ListenerManager(db);
     
     // Initialize and start listeners based on network configuration and active networks list
     const networksToInitialize = [];
@@ -51,10 +55,9 @@ async function initializeApi(networksToStart = [], networkConfigs) {
       await listenerManager.initialize(networksToInitialize);
     }
     
-    // Initialize the API server with the payment processor and listener manager
-    // We're passing null for the db parameter as it's not implemented in this example
+    // Initialize the API server with the payment processor, listener manager, and db
     // We're passing the networks config for the transaction storage to use for status updates
-    const { app, server, transactionStorage } = await initializeApiServer(paymentProcessor, listenerManager, null, networkConfigs);
+    const { app, server, transactionStorage } = await initializeApiServer(paymentProcessor, listenerManager, db, networkConfigs);
     
     // Start the listeners
     if (networksToInitialize.length > 0) {

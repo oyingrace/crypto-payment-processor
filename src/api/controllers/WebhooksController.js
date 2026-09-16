@@ -1,6 +1,6 @@
 /**
  * Webhooks API Controller
- * Handles API endpoints for webhooks
+ * Handles API endpoints for webhooks with PostgreSQL / Neon DB persistence
  */
 const crypto = require('crypto');
 const { ValidationError, NotFoundError } = require('../utils/errors');
@@ -12,6 +12,7 @@ class WebhooksController {
    */
   constructor(db) {
     this.db = db;
+    this.webhooks = []; // In-memory fallback
   }
 
   /**
@@ -56,10 +57,20 @@ class WebhooksController {
         created_at: new Date()
       };
       
-      // In a real implementation, this would save to the database
-      // For this example, we'll just return the webhook
+      this.webhooks.push(webhook);
+
+      if (this.db) {
+        try {
+          await this.db.query(
+            `INSERT INTO webhooks (id, url, events, description, secret, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [webhook.id, webhook.url, webhook.events, webhook.description, webhook.secret, webhook.created_at]
+          );
+        } catch (dbErr) {
+          console.error('[WebhooksController] Failed to persist webhook to DB:', dbErr.message);
+        }
+      }
       
-      // Return the webhook data
       res.status(200).json(webhook);
     } catch (error) {
       next(error);
@@ -74,13 +85,21 @@ class WebhooksController {
    */
   async listWebhooks(req, res, next) {
     try {
-      // In a real implementation, this would query the database
-      // For this example, we'll return an empty array
-      const webhooks = [];
-      
-      // Return the webhooks data
+      if (this.db) {
+        try {
+          const result = await this.db.query('SELECT * FROM webhooks ORDER BY created_at DESC');
+          if (result && result.rows) {
+            return res.status(200).json({
+              data: result.rows
+            });
+          }
+        } catch (dbErr) {
+          console.error('[WebhooksController] Failed to query webhooks from DB:', dbErr.message);
+        }
+      }
+
       res.status(200).json({
-        data: webhooks
+        data: this.webhooks
       });
     } catch (error) {
       next(error);
@@ -97,10 +116,16 @@ class WebhooksController {
     try {
       const { id } = req.params;
       
-      // In a real implementation, this would delete from the database
-      // For this example, we'll just return success
+      this.webhooks = this.webhooks.filter(w => w.id !== id);
+
+      if (this.db) {
+        try {
+          await this.db.query('DELETE FROM webhooks WHERE id = $1', [id]);
+        } catch (dbErr) {
+          console.error('[WebhooksController] Failed to delete webhook from DB:', dbErr.message);
+        }
+      }
       
-      // Return no content
       res.status(204).end();
     } catch (error) {
       next(error);

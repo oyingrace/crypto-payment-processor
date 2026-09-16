@@ -1,28 +1,64 @@
 /**
  * Transaction Storage Service
- * Keeps track of all detected transaction in memory while the server is running
+ * Keeps track of all detected transactions in memory and persists to PostgreSQL / Neon DB when configured
  */
 
 const axios = require('axios');
 
 class TransactionStorage {
-  constructor(networkConfig) {
+  constructor(networkConfig, db = null) {
     this.transactions = [];
     this.networkConfig = networkConfig;
+    this.db = db;
   }
 
   /**
-   * Add a new transaction to the storage
+   * Populate in-memory transactions cache from PostgreSQL if available
+   */
+  async loadFromDb() {
+    if (!this.db) return;
+
+    try {
+      const result = await this.db.query(
+        'SELECT * FROM transactions ORDER BY detected_at DESC'
+      );
+
+      if (result && result.rows) {
+        this.transactions = result.rows.map(row => ({
+          id: row.id,
+          sessionId: row.session_id,
+          txHash: row.tx_hash,
+          fromAddress: row.from_address,
+          toAddress: row.to_address,
+          amount: row.amount ? row.amount.toString() : '0',
+          currency: row.currency,
+          network: row.network,
+          confirmations: row.confirmations || 0,
+          status: row.status,
+          blockNumber: row.block_number ? parseInt(row.block_number, 10) : null,
+          detectedAt: row.detected_at,
+          confirmedAt: row.confirmed_at,
+          updatedAt: row.updated_at
+        }));
+        console.log(`[TransactionStorage] Loaded ${this.transactions.length} transactions from database.`);
+      }
+    } catch (error) {
+      console.error('[TransactionStorage] Failed to load transactions from database:', error.message);
+    }
+  }
+
+  /**
+   * Add a new transaction to the storage (cache & database)
    * @param {Object} transaction - Transaction object to store
    */
-  addTransaction(transaction) {
-    // Check if transaction already exists
+  async addTransaction(transaction) {
+    // Check if transaction already exists in cache
     const existingTxIndex = this.transactions.findIndex(tx => tx.txHash === transaction.txHash);
     
     // Ensure we have all required fields with proper defaults
     const txData = {
-      id: transaction.id,
-      sessionId: transaction.sessionId,
+      id: transaction.id || `tx_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+      sessionId: transaction.sessionId || null,
       txHash: transaction.txHash,
       fromAddress: transaction.fromAddress,
       toAddress: transaction.toAddress,
@@ -31,22 +67,62 @@ class TransactionStorage {
       network: transaction.network,
       confirmations: transaction.confirmations || 0,
       status: transaction.status || 'PENDING',
-      blockNumber: transaction.blockNumber,
+      blockNumber: transaction.blockNumber || null,
       detectedAt: transaction.detectedAt || new Date(),
       confirmedAt: transaction.confirmedAt || null,
       updatedAt: new Date()
     };
     
     if (existingTxIndex !== -1) {
-      // Update existing transaction
+      // Update existing transaction in cache
       this.transactions[existingTxIndex] = {
         ...this.transactions[existingTxIndex],
         ...txData
       };
     } else {
-      // Add new transaction
+      // Add new transaction to cache
       this.transactions.push(txData);
     }
+
+    // Persist to Neon DB if available
+    if (this.db) {
+      try {
+        const queryText = `
+          INSERT INTO transactions (
+            id, session_id, tx_hash, from_address, to_address, amount,
+            currency, network, confirmations, status, block_number,
+            detected_at, confirmed_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+          ON CONFLICT (tx_hash) DO UPDATE SET
+            confirmations = EXCLUDED.confirmations,
+            status = EXCLUDED.status,
+            block_number = COALESCE(EXCLUDED.block_number, transactions.block_number),
+            confirmed_at = COALESCE(EXCLUDED.confirmed_at, transactions.confirmed_at),
+            updated_at = NOW()
+        `;
+        const params = [
+          txData.id,
+          txData.sessionId,
+          txData.txHash,
+          txData.fromAddress,
+          txData.toAddress,
+          txData.amount,
+          txData.currency,
+          txData.network,
+          txData.confirmations,
+          txData.status,
+          txData.blockNumber,
+          txData.detectedAt,
+          txData.confirmedAt,
+          txData.updatedAt
+        ];
+        await this.db.query(queryText, params);
+      } catch (dbError) {
+        console.error('[TransactionStorage] Failed to persist transaction to database:', dbError.message);
+      }
+    }
+
+    return txData;
   }
 
   /**
@@ -69,7 +145,7 @@ class TransactionStorage {
   /**
    * Update transaction status by checking the blockchain explorer
    * @param {string} txHash - Transaction hash to update
-   * @param {string} network - Network name (e.g., 'POLYGON', 'BEP20')
+   * @param {string} network - Network name (e.g., 'BEP20', 'POLYGON')
    * @returns {Promise<Object|null>} Updated transaction or null if not found
    */
   async updateTransactionStatus(txHash, network) {
@@ -125,6 +201,21 @@ class TransactionStorage {
         };
         
         this.transactions[txIndex] = updatedTx;
+
+        // Persist status update to DB
+        if (this.db) {
+          try {
+            await this.db.query(
+              `UPDATE transactions 
+               SET status = $1, confirmations = $2, block_number = $3, confirmed_at = $4, updated_at = NOW()
+               WHERE tx_hash = $5`,
+              [updatedTx.status, updatedTx.confirmations, updatedTx.blockNumber, updatedTx.confirmedAt, txHash]
+            );
+          } catch (err) {
+            console.error('[TransactionStorage] Failed to update transaction in database:', err.message);
+          }
+        }
+
         return updatedTx;
       }
       
@@ -151,6 +242,20 @@ class TransactionStorage {
           };
           
           this.transactions[txIndex] = updatedTx;
+
+          if (this.db) {
+            try {
+              await this.db.query(
+                `UPDATE transactions 
+                 SET status = $1, confirmations = $2, confirmed_at = $3, updated_at = NOW()
+                 WHERE tx_hash = $4`,
+                [updatedTx.status, updatedTx.confirmations, updatedTx.confirmedAt, txHash]
+              );
+            } catch (err) {
+              console.error('[TransactionStorage] Failed to update transaction via explorer in DB:', err.message);
+            }
+          }
+
           return updatedTx;
         }
       }
@@ -180,4 +285,4 @@ class TransactionStorage {
   }
 }
 
-module.exports = TransactionStorage; 
+module.exports = TransactionStorage;
