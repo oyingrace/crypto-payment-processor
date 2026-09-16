@@ -76,7 +76,5 @@ For more information, see the `/docs` folder:
 - [Integration Guide](./docs/integration/integration_guide.md)
 - [API Documentation](./docs/integration/api_documentation.md)
 
-For business queries, please drop an email to tanujsinghkushwah@gmail.com
-
 ## License
 MIT
